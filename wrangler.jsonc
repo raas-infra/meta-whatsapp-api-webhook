@@ -1,0 +1,7 @@
+{
+  "name": "whatsapp-webhook",
+  "account_id": "dab1b8d19ec2538977cc5ea93d9c835b",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-01",
+  "observability": { "enabled": true }
+}
