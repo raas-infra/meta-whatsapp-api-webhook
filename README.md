@@ -55,6 +55,7 @@ It handles Meta's webhook verification handshake, validates the `X-Hub-Signature
 1. **Verification (`GET /webhook`)** – When you register the callback URL in the Meta dashboard, Meta sends a `GET` request with `hub.mode=subscribe`, your `hub.verify_token`, and a random `hub.challenge`. If the token matches `VERIFY_TOKEN`, the Worker echoes the challenge back with `200`; otherwise it returns `403`.
 2. **Events (`POST /webhook`)** – Meta sends a JSON payload for each event. The Worker:
    - reads the raw body,
+   - rejects the event with `500` if `APP_SECRET` is not configured (fail closed),
    - computes `sha256=<HMAC(APP_SECRET, body)>` and compares it to `X-Hub-Signature-256` (returns `401` on mismatch),
    - parses the JSON (returns `400` if invalid),
    - logs each message and status,
@@ -111,7 +112,7 @@ npm install
 | Variable       | Required | Description                                                                                                  |
 | -------------- | -------- | ------------------------------------------------------------------------------------------------------------ |
 | `VERIFY_TOKEN` | Yes      | Any string you choose. Must match the **Verify token** entered in the Meta webhook configuration.            |
-| `APP_SECRET`   | Strongly recommended | Your Meta app's **App Secret** (App settings → Basic). Used to validate `X-Hub-Signature-256`. If unset, signatures are **not** verified and a warning is logged. |
+| `APP_SECRET`   | Yes | Your Meta app's **App Secret** (App settings → Basic). Used to validate `X-Hub-Signature-256`. If unset, every event is rejected with `500` (fail closed). |
 
 #### Local (`.dev.vars`)
 
@@ -226,9 +227,10 @@ Receives WhatsApp event notifications.
 
 | Response                  | When                                           |
 | ------------------------- | ---------------------------------------------- |
-| `200 EVENT_RECEIVED`      | Signature valid (or `APP_SECRET` unset) and body is valid JSON |
+| `200 EVENT_RECEIVED`      | Signature valid and body is valid JSON |
 | `400 Bad request`         | Body is not valid JSON                         |
 | `401 Invalid signature`   | Signature missing or doesn't match             |
+| `500 Server misconfigured` | `APP_SECRET` is not set                       |
 
 ### Other routes
 
@@ -290,7 +292,7 @@ Expected: `200 EVENT_RECEIVED`, and a `message {...}` line in the dev server out
 
 ## Security Notes
 
-- **Always set `APP_SECRET` in production.** Without it, anyone who knows the URL can post fake events.
+- **`APP_SECRET` is required.** The Worker fails closed: without it, all events are rejected with `500` rather than accepted unverified. If Meta disables the webhook after repeated failures, restore the secret and click **Verify and save** again in the Meta dashboard; Meta retries failed events for several days.
 - Use a long, random `VERIFY_TOKEN` (e.g. `openssl rand -hex 32`).
 - Never commit `.dev.vars` or any file containing secrets — they're excluded by `.gitignore`.
 - The signature is computed over the **raw** request body; don't modify or re-serialize the body before verifying.
@@ -305,7 +307,7 @@ Expected: `200 EVENT_RECEIVED`, and a `message {...}` line in the dev server out
 | Meta says *"The callback URL or verify token couldn't be validated"* | `VERIFY_TOKEN` secret not set in production, value mismatch, or URL missing `/webhook`. |
 | `401 Invalid signature` on real events | `APP_SECRET` is wrong (use the App Secret, not an access token) or belongs to a different Meta app. |
 | No events arriving | The `messages` webhook field isn't subscribed, or the phone number/WABA isn't linked to the app. |
-| `APP_SECRET not set` warning in logs | Run `npx wrangler secret put APP_SECRET`. |
+| `500 Server misconfigured` / `APP_SECRET not set` error in logs | Run `npx wrangler secret put APP_SECRET`, then re-verify the webhook in the Meta dashboard if it was disabled. |
 | Meta keeps retrying the same event | The Worker returned a non-`200` response — check logs for `400`/`401`. |
 
 ---

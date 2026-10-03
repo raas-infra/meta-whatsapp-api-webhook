@@ -32,15 +32,16 @@ function verifySubscription(url, env) {
 async function receiveEvent(request, env) {
   const rawBody = await request.text();
 
-  if (env.APP_SECRET) {
-    const signature = request.headers.get("X-Hub-Signature-256") || "";
-    const expected = "sha256=" + (await hmacSha256Hex(env.APP_SECRET, rawBody));
-    if (!timingSafeEqual(signature, expected)) {
-      return new Response("Invalid signature", { status: 401 });
-    }
-  } else {
-    // Allows events through until the Meta App Secret is configured; set it with `wrangler secret put APP_SECRET`.
-    console.warn("APP_SECRET not set: webhook signature NOT verified");
+  if (!env.APP_SECRET) {
+    // Fail closed: never accept unverified events. Set it with `wrangler secret put APP_SECRET`.
+    console.error("APP_SECRET not set: rejecting webhook event");
+    return new Response("Server misconfigured", { status: 500 });
+  }
+
+  const signature = request.headers.get("X-Hub-Signature-256") || "";
+  const expected = "sha256=" + (await hmacSha256Hex(env.APP_SECRET, rawBody));
+  if (!timingSafeEqual(signature, expected)) {
+    return new Response("Invalid signature", { status: 401 });
   }
 
   let payload;
